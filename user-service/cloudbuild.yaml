@@ -1,0 +1,26 @@
+steps:
+  # Print the Go version being used.
+  - name: 'mirror.gcr.io/library/golang'
+    args: ['go', 'version']
+  # Make a deploy directory we'll tar after building the app.
+  - name: 'debian'
+    args: ['mkdir', '-p', 'deploy/etc/systemd/system/', 'deploy/usr/bin']
+  # Build the app.
+  - name: 'mirror.gcr.io/library/golang'
+    env: [
+      'GO111MODULE=on',
+      'GOPROXY=https://proxy.golang.org,direct',
+      'GOOS=linux',
+      'GOARCH=amd64'
+    ]
+    args: ['go', 'build', '-o', 'deploy/usr/bin/app', '.']
+  # Copy the systemd service file into the deploy directory.
+  - name: 'debian'
+    args: ['cp', 'my-app.service', 'deploy/etc/systemd/system/']
+  # Compress the depoy directory.
+  - name: 'debian'
+    args: ['tar', '-czf', '${_DEPLOY_FILENAME}', '-C', './deploy', '.']
+artifacts:
+  objects:
+    location: '${_DEPLOY_DIR}'
+    paths: ['${_DEPLOY_FILENAME}']
