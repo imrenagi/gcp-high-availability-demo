@@ -29,10 +29,11 @@ resource "google_compute_instance_template" "user_service_instance_template" {
     subnetwork  = var.subnetwork
   }
 
-
   metadata = {
-    app-location = "gs://gcp-ha-demo-user-service-artefact/app.tar.gz"
-    startup-script-url = "gs://gcp-ha-demo-user-service-artefact/startup-script.sh"
+    app-location = "gs://eatn-user-service/app.tar.gz"
+    startup-script-url = "gs://eatn-user-service/startup-script.sh"
+    postgres-host = var.postgres_host
+    postgres-replica-hosts = var.postgres_replica_hosts
   }
 
   service_account {
@@ -47,19 +48,3 @@ resource "google_compute_instance_template" "user_service_instance_template" {
   }
 }
 
-resource "google_compute_instance_group_manager" "instance_group_manager" {
-  for_each           = toset(var.instance_group_zones)
-  name               = "${var.name}-${each.value}-igm"
-  base_instance_name = var.name
-  zone               = each.value
-  target_size        = var.instance_group_replicas
-
-  version {
-    instance_template  = google_compute_instance_template.user_service_instance_template.id
-  }
-
-  named_port {
-    name = "http"
-    port = 8888
-  }
-}

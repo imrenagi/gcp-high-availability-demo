@@ -1,12 +1,12 @@
 steps:
   # Print the Go version being used.
-  - name: 'mirror.gcr.io/library/golang'
+  - name: 'golang:1.15'
     args: ['go', 'version']
   # Make a deploy directory we'll tar after building the app.
   - name: 'debian'
     args: ['mkdir', '-p', 'deploy/etc/systemd/system/', 'deploy/usr/bin']
   # Build the app.
-  - name: 'mirror.gcr.io/library/golang'
+  - name: 'golang:1.15'
     env: [
       'GO111MODULE=on',
       'GOPROXY=https://proxy.golang.org,direct',

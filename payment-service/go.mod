@@ -1,9 +1,8 @@
-module github.com/imrenagi/gcp-high-availability-demo/user-service
+module github.com/imrenagi/cloudrun-demo/multi-region
 
 go 1.15
 
 require (
-	github.com/bxcodec/faker/v3 v3.6.0
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
 	github.com/rs/zerolog v1.20.0
