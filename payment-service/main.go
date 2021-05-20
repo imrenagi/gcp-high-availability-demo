@@ -45,6 +45,12 @@ func main() {
 
 	var dialectors []gorm.Dialector
 	for _, ip := range ips {
+
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+
 		rdsn := fmt.Sprintf("host=%s port=%s user=%s DB.name=%s password=%s sslmode=disable", ip, "5432", os.Getenv("POSTGRES_USER"), os.Getenv("POSTGRES_DB"), os.Getenv("POSTGRES_PASSWORD"))
 		config := postgres.Config{
 			DSN:                  rdsn,
@@ -166,6 +172,13 @@ func hcHandler() http.HandlerFunc {
 
 func listPayment(db *gorm.DB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
+
+		if os.Getenv("FAIL") == "true" {
+			rw.WriteHeader(http.StatusInternalServerError)
+			rw.Write([]byte("failed to handle the request"))			
+			return
+		}
+
 		var payments []Payment
 		err := db.WithContext(r.Context()).Order("created_at desc").
 			Limit(20).
@@ -208,6 +221,13 @@ func (p *Payment) BeforeCreate(tx *gorm.DB) (err error) {
 
 func createPayment(db *gorm.DB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
+
+		if os.Getenv("FAIL") == "true" {
+			rw.WriteHeader(http.StatusInternalServerError)
+			rw.Write([]byte("failed to handle the request"))			
+			return
+		}
+
 		region, err := region()
 		if err != nil {
 			region = []byte(`12345`)

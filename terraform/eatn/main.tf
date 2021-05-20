@@ -28,6 +28,22 @@ resource "google_compute_subnetwork" "eatn-asia-southeast2-subnet" {
   private_ip_google_access = true
 }
 
+resource "google_compute_subnetwork" "eatn-asia-southeast1-subnet" {
+  name          = "asia-southeast1-subnet"
+  ip_cidr_range = "10.1.16.0/23" 
+  region        = "asia-southeast1"
+  network       = google_compute_network.vpc_network.id
+  private_ip_google_access = true
+}
+
+resource "google_compute_subnetwork" "eatn-us-west1-subnet" {
+  name          = "us-west1-subnet"
+  ip_cidr_range = "10.1.18.0/23" 
+  region        = "us-west1"
+  network       = google_compute_network.vpc_network.id
+  private_ip_google_access = true
+}
+
 resource "google_compute_firewall" "fw_allow_ssh" {
   name    = "fw-allow-ssh"
   network = google_compute_network.vpc_network.name
@@ -71,6 +87,22 @@ resource "google_compute_firewall" "fw_allow_hc_proxy" {
   ]
 }
 
+resource "google_compute_firewall" "locust_firewall" {
+  name    = "fw-locust"
+  network = google_compute_network.vpc_network.name
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["5557"]
+  }
+
+  target_tags = ["locust"]
+  source_ranges = [
+    "0.0.0.0/0",    
+  ]
+}
+
 resource "google_compute_global_address" "private_ip_address" {
   provider = google-beta
   name          = "private-ip-address"
@@ -110,6 +142,29 @@ resource "google_compute_router_nat" "eatn_asia_southeast2_nat" {
   }
 }
 
+resource "google_compute_router" "eatn_asia_southeast1_router" {
+  name    = "eatn-asia-southeast1-router"
+  region  = google_compute_subnetwork.eatn-asia-southeast1-subnet.region
+  network = google_compute_network.vpc_network.id
+
+  bgp {
+    asn = 64514
+  }
+}
+
+resource "google_compute_router_nat" "eatn_asia_southeast1_nat" {
+  name                               = "eatn-asia-southeast1-nat"
+  router                             = google_compute_router.eatn_asia_southeast1_router.name
+  region                             = google_compute_router.eatn_asia_southeast1_router.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = false
+    filter = "ERRORS_ONLY"
+  }
+}
+
 
 resource "google_compute_router" "eatn_us_central1_router" {
   name    = "eatn-us-central1-router"
@@ -125,6 +180,30 @@ resource "google_compute_router_nat" "eatn_us_central1_nat" {
   name                               = "eatn-us-central1-nat"
   router                             = google_compute_router.eatn_us_central1_router.name
   region                             = google_compute_router.eatn_us_central1_router.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = false
+    filter = "ERRORS_ONLY"
+  }
+}
+
+
+resource "google_compute_router" "eatn_us_west1_router" {
+  name    = "eatn-us-west1-router"
+  region  = google_compute_subnetwork.eatn-us-west1-subnet.region
+  network = google_compute_network.vpc_network.id
+
+  bgp {
+    asn = 64514
+  }
+}
+
+resource "google_compute_router_nat" "eatn_us_west1_nat" {
+  name                               = "eatn-us-west1-nat"
+  router                             = google_compute_router.eatn_us_west1_router.name
+  region                             = google_compute_router.eatn_us_west1_router.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 
@@ -193,6 +272,67 @@ resource "google_vpc_access_connector" "payment_service_sg_connector" {
 }
 
 
+module "payment_service_id_db" {
+
+  source = "./cloudsql/"
+  project = "eatn-production"
+  name = "payment-service-id"
+  region = "asia-southeast2"
+  master_zone = "asia-southeast2-a"
+  network = google_compute_network.vpc_network.id
+  db_user_name = "payment-service"
+  db_user_password = "password01"
+  db_name = "payment-service"
+  replicas = [    
+    {
+      region  = "asia-southeast2"
+      zone    = "asia-southeast2-c"
+    }
+  ]  
+}
+
+module "payment_service_us_db" {
+
+  source = "./cloudsql/"
+  project = "eatn-production"
+  name = "payment-service-usa"
+  region = "us-central1"
+  master_zone = "us-central1-a"
+  network = google_compute_network.vpc_network.id
+  db_user_name = "payment-service"
+  db_user_password = "password01"
+  db_name = "payment-service"
+  replicas = [    
+    {
+      region  = "us-central1"
+      zone    = "us-central1-b"
+    }
+  ]  
+}
+
+module "user_service_db" {
+
+  source = "./cloudsql/"
+  project = "eatn-production"
+  name = "user-service"
+  region = "asia-southeast2"
+  network = google_compute_network.vpc_network.id
+  db_user_name = "user-service"
+  db_user_password = "password01"
+  db_name = "user-service"
+  master_zone = "asia-southeast2-a"
+  replicas = [
+    {
+      region  = "asia-southeast2"
+      zone    = "asia-southeast2-c"
+    },
+    {
+      region  = "us-central1"
+      zone    = "us-central1-a"
+    }
+  ]  
+}
+
 # user service in us_central1
 
 module "us_central1_user_service_instance_template" {
@@ -211,37 +351,14 @@ module "us_central1_user_service_instance_group" {
   region      = "us-central1"
   zones        = [
     "us-central1-a",
-    "us-central1-f"
+    "us-central1-b"
     ]
-  replicas    = 1
+  replicas    = 2
   instance_template_id = module.us_central1_user_service_instance_template.instance_template_name
 }
 
-# # user service in europe_west1
 
-module "europe_west1_user_service_instance_template" {
-  source = "./instance_template/"
-  name        = "user-service-europe-west1"
-  region      = "europe-west1"
-  network     = "eatn-network"
-  subnetwork  = "europe-west1-subnet"
-  postgres_host = module.user_service_db.master_private_ip_address
-  postgres_replica_hosts = join(",", module.user_service_db.replica_private_ip_addresses)
-}
-
-module "europe_west1_user_service_instance_group" {
-  source = "./instance_group/"
-  name        = "user-service-europe-west1"
-  region      = "europe-west1"
-  zones        = [
-    "europe-west1-c",
-    "europe-west1-b"
-    ]
-  replicas    = 1
-  instance_template_id = module.europe_west1_user_service_instance_template.instance_template_name
-}
-
-# # user service in asia-southeast2
+# # # user service in asia-southeast2
 
 module "asia_southeast2_user_service_instance_template" {
   source = "./instance_template/"
@@ -261,7 +378,7 @@ module "asia_southeast2_user_service_instance_group" {
     "asia-southeast2-a",
     "asia-southeast2-b"
     ]
-  replicas    = 1
+  replicas    = 2
   instance_template_id = module.asia_southeast2_user_service_instance_template.instance_template_name
 }
 
@@ -350,19 +467,6 @@ module "gce-lb-https" {
           max_utilization              = null
         },
         {
-          group                        = module.europe_west1_user_service_instance_group.instance_group
-          balancing_mode               = null
-          capacity_scaler              = null
-          description                  = null
-          max_connections              = null
-          max_connections_per_instance = null
-          max_connections_per_endpoint = null
-          max_rate                     = null
-          max_rate_per_instance        = null
-          max_rate_per_endpoint        = null
-          max_utilization              = null
-        },
-        {
           group                        = module.asia_southeast2_user_service_instance_group.instance_group
           balancing_mode               = null
           capacity_scaler              = null
@@ -408,482 +512,351 @@ resource "google_compute_url_map" "ml-bkd-ml-mig-bckt-s-lb" {
       service = module.gce-lb-https.backend_services["default"].self_link
     }
 
-    # path_rule {
-    #   paths = [
-    #     "/payments/us/api/*"
-    #   ]
-    #   service = google_compute_backend_service.payment_service_us_backend_service.self_link
-    # }
+    path_rule {
+      paths = [
+        "/payments/us/api/*"
+      ]
+      service = google_compute_backend_service.payment_service_us_backend_service.self_link
+    }
 
 
-    # path_rule {
-    #   paths = [        
-    #     "/payments/id/api/*"        
-    #   ]
-    #   service = google_compute_backend_service.payment_service_id_backend_service.self_link
-    # }
+    path_rule {
+      paths = [        
+        "/payments/id/api/*"        
+      ]
+      service = google_compute_backend_service.payment_service_id_backend_service.self_link
+    }
   }
-}
-
-module "payment_service_id_db" {
-
-  source = "./cloudsql/"
-  project = "eatn-production"
-  name = "payment-service-id"
-  region = "asia-southeast2"
-  master_zone = "asia-southeast2-a"
-  network = google_compute_network.vpc_network.id
-  db_user_name = "payment-service"
-  db_user_password = "password01"
-  db_name = "payment-service"
-  replicas = [    
-    {
-      region  = "asia-southeast2"
-      zone    = "asia-southeast2-b"
-    }
-  ]  
-}
-
-module "payment_service_us_db" {
-
-  source = "./cloudsql/"
-  project = "eatn-production"
-  name = "payment-service-usa"
-  region = "us-central1"
-  master_zone = "us-central1-f"
-  network = google_compute_network.vpc_network.id
-  db_user_name = "payment-service"
-  db_user_password = "password01"
-  db_name = "payment-service"
-  replicas = [    
-    {
-      region  = "us-central1"
-      zone    = "us-central1-a"
-    }
-  ]  
-}
-
-module "user_service_db" {
-
-  source = "./cloudsql/"
-  project = "eatn-production"
-  name = "user-service"
-  region = "asia-southeast2"
-  network = google_compute_network.vpc_network.id
-  db_user_name = "user-service"
-  db_user_password = "password01"
-  db_name = "user-service"
-  master_zone = "asia-southeast2-a"
-  replicas = [
-    {
-      region  = "asia-southeast2"
-      zone    = "asia-southeast2-b"
-    }
-  ]  
 }
 
 #  ========== Start of Cloud Run Payment Service ID ===================
 
+resource "google_cloud_run_service" "payment_service_id_asia_southeast2" {
+  name     = "payment-service-id-asia-southeast2"
+  location = "asia-southeast2"
+  project  = "eatn-production"
 
+  depends_on = [
+    google_vpc_access_connector.payment_service_id_connector
+  ]
 
-# resource "google_cloud_run_service" "payment_service_id_asia_southeast2" {
-#   name     = "payment-service-id-asia-southeast2"
-#   location = "asia-southeast2"
-#   project  = "eatn-production"
+  template {
+    metadata {
+      annotations = {
+        "autoscaling.knative.dev/maxScale"      = "1"     
+        "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_id_connector.self_link
+      }
+    }
 
-#   depends_on = [
-#     google_vpc_access_connector.payment_service_id_connector
-#   ]
+    spec {
+      containers {
+        image = "gcr.io/eatn-production/payment-service:v1"
+        env {
+          name = "COUNTRY_CODE"
+          value = "id"
+        }
+        env {
+          name = "POSTGRES_HOST"
+          value = module.payment_service_id_db.master_private_ip_address
+        }
+        env {
+          name = "POSTGRES_USER"
+          value = module.payment_service_id_db.db_user_name
+        }
+        env {
+          name = "POSTGRES_DB"
+          value = module.payment_service_id_db.db_name
+        }
+        env {
+          name = "POSTGRES_PASSWORD"
+          value = module.payment_service_id_db.db_user_password
+        }      
+        env {
+          name = "POSTGRES_REPLICA_IPS"
+          value = join(",", module.payment_service_id_db.replica_private_ip_addresses)
+        }  
+      }
+    }
+  }
+}
 
-#   template {
-#     metadata {
-#       annotations = {
-#         "autoscaling.knative.dev/maxScale"      = "5"     
-#         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_id_connector.self_link
-#       }
-#     }
-
-#     spec {
-#       containers {
-#         image = "gcr.io/eatn-production/payment-service:v1"
-#         env {
-#           name = "COUNTRY_CODE"
-#           value = "id"
-#         }
-#         env {
-#           name = "POSTGRES_HOST"
-#           value = module.payment_service_id_db.master_private_ip_address
-#         }
-#         env {
-#           name = "POSTGRES_USER"
-#           value = module.payment_service_id_db.db_user_name
-#         }
-#         env {
-#           name = "POSTGRES_DB"
-#           value = module.payment_service_id_db.db_name
-#         }
-#         env {
-#           name = "POSTGRES_PASSWORD"
-#           value = module.payment_service_id_db.db_user_password
-#         }      
-#         env {
-#           name = "POSTGRES_REPLICA_IPS"
-#           value = join(",", module.payment_service_id_db.replica_private_ip_addresses)
-#         }  
-#       }
-#     }
-#   }
-# }
-
-# resource "google_cloud_run_service_iam_member" "payment_service_id_asia_southeast2_public_access" {
-#   location = google_cloud_run_service.payment_service_id_asia_southeast2.location
-#   project  = google_cloud_run_service.payment_service_id_asia_southeast2.project
-#   service  = google_cloud_run_service.payment_service_id_asia_southeast2.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
+resource "google_cloud_run_service_iam_member" "payment_service_id_asia_southeast2_public_access" {
+  location = google_cloud_run_service.payment_service_id_asia_southeast2.location
+  project  = google_cloud_run_service.payment_service_id_asia_southeast2.project
+  service  = google_cloud_run_service.payment_service_id_asia_southeast2.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
 
 
-# resource "google_cloud_run_service" "payment_service_id_asia_southeast1" {
-#   name     = "payment-service-id-asia-southeast1"
-#   location = "asia-southeast1"
-#   project  = "eatn-production"
+resource "google_cloud_run_service" "payment_service_id_asia_southeast1" {
+  name     = "payment-service-id-asia-southeast1"
+  location = "asia-southeast1"
+  project  = "eatn-production"
 
-#   depends_on = [
-#     google_vpc_access_connector.payment_service_sg_connector
-#   ]
+  depends_on = [
+    google_vpc_access_connector.payment_service_sg_connector
+  ]
 
-#   template {
-#     metadata {
-#       annotations = {
-#         "autoscaling.knative.dev/maxScale"      = "5"     
-#         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_sg_connector.self_link
-#       }
-#     }
+  template {
+    metadata {
+      annotations = {
+        "autoscaling.knative.dev/maxScale"      = "3"     
+        "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_sg_connector.self_link
+      }
+    }
 
-#     spec {
-#       containers {
-#         image = "gcr.io/eatn-production/payment-service:v1"
-#         env {
-#           name = "COUNTRY_CODE"
-#           value = "id"
-#         }
-#         env {
-#           name = "POSTGRES_HOST"
-#           value = module.payment_service_id_db.master_private_ip_address
-#         }
-#         env {
-#           name = "POSTGRES_USER"
-#           value = module.payment_service_id_db.db_user_name
-#         }
-#         env {
-#           name = "POSTGRES_DB"
-#           value = module.payment_service_id_db.db_name
-#         }
-#         env {
-#           name = "POSTGRES_PASSWORD"
-#           value = module.payment_service_id_db.db_user_password
-#         }      
-#         env {
-#           name = "POSTGRES_REPLICA_IPS"
-#           value = join(",", module.payment_service_id_db.replica_private_ip_addresses)
-#         }  
-#       }
-#     }
-#   }
-# }
+    spec {
+      containers {
+        image = "gcr.io/eatn-production/payment-service:v1"
+        env {
+          name = "COUNTRY_CODE"
+          value = "id"
+        }
+        env {
+          name = "POSTGRES_HOST"
+          value = module.payment_service_id_db.master_private_ip_address
+        }
+        env {
+          name = "POSTGRES_USER"
+          value = module.payment_service_id_db.db_user_name
+        }
+        env {
+          name = "POSTGRES_DB"
+          value = module.payment_service_id_db.db_name
+        }
+        env {
+          name = "POSTGRES_PASSWORD"
+          value = module.payment_service_id_db.db_user_password
+        }      
+        env {
+          name = "POSTGRES_REPLICA_IPS"
+          value = join(",", module.payment_service_id_db.replica_private_ip_addresses)
+        }  
+      }
+    }
+  }
+}
 
-# resource "google_cloud_run_service_iam_member" "payment_service_id_asia_southeast1_public_access" {
-#   location = google_cloud_run_service.payment_service_id_asia_southeast1.location
-#   project  = google_cloud_run_service.payment_service_id_asia_southeast1.project
-#   service  = google_cloud_run_service.payment_service_id_asia_southeast1.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
+resource "google_cloud_run_service_iam_member" "payment_service_id_asia_southeast1_public_access" {
+  location = google_cloud_run_service.payment_service_id_asia_southeast1.location
+  project  = google_cloud_run_service.payment_service_id_asia_southeast1.project
+  service  = google_cloud_run_service.payment_service_id_asia_southeast1.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
-# resource "google_compute_region_network_endpoint_group" "payment_service_id_asia_southeast2_neg" {
-#   provider              = google-beta
-#   name                  = "payment-service-id-asia-southeast2-neg"
-#   network_endpoint_type = "SERVERLESS"
-#   region                = "asia-southeast2"
-#   cloud_run {
-#     service = google_cloud_run_service.payment_service_id_asia_southeast2.name
-#   }
-# }
+resource "google_compute_region_network_endpoint_group" "payment_service_id_asia_southeast2_neg" {
+  provider              = google-beta
+  name                  = "payment-service-id-asia-southeast2-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = "asia-southeast2"
+  cloud_run {
+    service = google_cloud_run_service.payment_service_id_asia_southeast2.name
+  }
+}
 
-# resource "google_compute_region_network_endpoint_group" "payment_service_id_asia_southeast1_neg" {
-#   provider              = google-beta
-#   name                  = "payment-service-id-asia-southeast1-neg"
-#   network_endpoint_type = "SERVERLESS"
-#   region                = "asia-southeast1"
-#   cloud_run {
-#     service = google_cloud_run_service.payment_service_id_asia_southeast1.name
-#   }
-# }
+resource "google_compute_region_network_endpoint_group" "payment_service_id_asia_southeast1_neg" {
+  provider              = google-beta
+  name                  = "payment-service-id-asia-southeast1-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = "asia-southeast1"
+  cloud_run {
+    service = google_cloud_run_service.payment_service_id_asia_southeast1.name
+  }
+}
 
-# resource "google_compute_backend_service" "payment_service_id_backend_service" {
-#   provider = google-beta
-#   project = "eatn-production"
-#   name = "payment-service-id-backend"
+resource "google_compute_backend_service" "payment_service_id_backend_service" {
+  provider = google-beta
+  project = "eatn-production"
+  name = "payment-service-id-backend"
 
-#   description = null
-#   connection_draining_timeout_sec = null
-#   enable_cdn = false
-#   custom_request_headers = []
+  description = null
+  connection_draining_timeout_sec = null
+  enable_cdn = false
+  custom_request_headers = []
 
-#   backend {   
-#     group = google_compute_region_network_endpoint_group.payment_service_id_asia_southeast2_neg.id   
-#   }
+  backend {   
+    group = google_compute_region_network_endpoint_group.payment_service_id_asia_southeast2_neg.id   
+  }
 
-#   backend {   
-#     group = google_compute_region_network_endpoint_group.payment_service_id_asia_southeast1_neg.id   
-#   }
+  backend {   
+    group = google_compute_region_network_endpoint_group.payment_service_id_asia_southeast1_neg.id   
+  }
   
-#   security_policy                 = null    
-#   log_config {
-#     enable      = false
-#     sample_rate = null
-#   }
-# }
+  security_policy                 = null    
+  log_config {
+    enable      = false
+    sample_rate = null
+  }
+}
 
-# #  ========== End of Cloud Run Payment Service ID ===================
-
-
-# #  ========== Start of Cloud Run Payment Service US ===================
+#  ========== End of Cloud Run Payment Service ID ===================
 
 
+#  ========== Start of Cloud Run Payment Service US ===================
 
 
+resource "google_cloud_run_service" "payment_service_us_us_central1" {
+  name     = "payment-service-us-us-central1"
+  location = "us-central1"
+  project  = "eatn-production"
 
-# resource "google_cloud_run_service" "payment_service_us_us_central1" {
-#   name     = "payment-service-us-us-central1"
-#   location = "us-central1"
-#   project  = "eatn-production"
+  depends_on = [
+    google_vpc_access_connector.payment_service_us_us_central1_connector
+  ]
 
-#   depends_on = [
-#     google_vpc_access_connector.payment_service_us_us_central1_connector
-#   ]
+  template {
+    metadata {
+      annotations = {
+        "autoscaling.knative.dev/maxScale"      = "5"     
+        "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_us_us_central1_connector.self_link
+      }
+    }
 
-#   template {
-#     metadata {
-#       annotations = {
-#         "autoscaling.knative.dev/maxScale"      = "5"     
-#         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_us_us_central1_connector.self_link
-#       }
-#     }
+    spec {
+      containers {
+        image = "gcr.io/eatn-production/payment-service:v1"
+        env {
+          name = "COUNTRY_CODE"
+          value = "us"
+        }
+        env {
+          name = "POSTGRES_HOST"
+          value = module.payment_service_us_db.master_private_ip_address
+        }
+        env {
+          name = "POSTGRES_USER"
+          value = module.payment_service_us_db.db_user_name
+        }
+        env {
+          name = "POSTGRES_DB"
+          value = module.payment_service_us_db.db_name
+        }
+        env {
+          name = "POSTGRES_PASSWORD"
+          value = module.payment_service_us_db.db_user_password
+        }      
+        env {
+          name = "POSTGRES_REPLICA_IPS"
+          value = join(",", module.payment_service_us_db.replica_private_ip_addresses)
+        }  
+      }
+    }
+  }
+}
 
-#     spec {
-#       containers {
-#         image = "gcr.io/eatn-production/payment-service:v1"
-#         env {
-#           name = "COUNTRY_CODE"
-#           value = "us"
-#         }
-#         env {
-#           name = "POSTGRES_HOST"
-#           value = module.payment_service_us_db.master_private_ip_address
-#         }
-#         env {
-#           name = "POSTGRES_USER"
-#           value = module.payment_service_us_db.db_user_name
-#         }
-#         env {
-#           name = "POSTGRES_DB"
-#           value = module.payment_service_us_db.db_name
-#         }
-#         env {
-#           name = "POSTGRES_PASSWORD"
-#           value = module.payment_service_us_db.db_user_password
-#         }      
-#         env {
-#           name = "POSTGRES_REPLICA_IPS"
-#           value = join(",", module.payment_service_us_db.replica_private_ip_addresses)
-#         }  
-#       }
-#     }
-#   }
-# }
+resource "google_cloud_run_service_iam_member" "payment_service_us_us_central1_public_access" {
+  location = google_cloud_run_service.payment_service_us_us_central1.location
+  project  = google_cloud_run_service.payment_service_us_us_central1.project
+  service  = google_cloud_run_service.payment_service_us_us_central1.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
-# resource "google_cloud_run_service_iam_member" "payment_service_us_us_central1_public_access" {
-#   location = google_cloud_run_service.payment_service_us_us_central1.location
-#   project  = google_cloud_run_service.payment_service_us_us_central1.project
-#   service  = google_cloud_run_service.payment_service_us_us_central1.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
+resource "google_cloud_run_service" "payment_service_us_us_east1" {
+  name     = "payment-service-us-us-east1"
+  location = "us-east1"
+  project  = "eatn-production"
 
-# resource "google_cloud_run_service" "payment_service_us_us_west1" {
-#   name     = "payment-service-us-us-west1"
-#   location = "us-west1"
-#   project  = "eatn-production"
+  depends_on = [
+    google_vpc_access_connector.payment_service_us_us_east1_connector
+  ]
 
-#   depends_on = [
-#     google_vpc_access_connector.payment_service_us_us_west1_connector
-#   ]
+  template {
+    metadata {
+      annotations = {
+        "autoscaling.knative.dev/maxScale"      = "5"     
+        "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_us_us_east1_connector.self_link
+      }
+    }
 
-#   template {
-#     metadata {
-#       annotations = {
-#         "autoscaling.knative.dev/maxScale"      = "5"     
-#         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_us_us_west1_connector.self_link
-#       }
-#     }
+    spec {
+      containers {
+        image = "gcr.io/eatn-production/payment-service:v1"
+        env {
+          name = "COUNTRY_CODE"
+          value = "us"
+        }
+        env {
+          name = "POSTGRES_HOST"
+          value = module.payment_service_us_db.master_private_ip_address
+        }
+        env {
+          name = "POSTGRES_USER"
+          value = module.payment_service_us_db.db_user_name
+        }
+        env {
+          name = "POSTGRES_DB"
+          value = module.payment_service_us_db.db_name
+        }
+        env {
+          name = "POSTGRES_PASSWORD"
+          value = module.payment_service_us_db.db_user_password
+        }      
+        env {
+          name = "POSTGRES_REPLICA_IPS"
+          value = join(",", module.payment_service_us_db.replica_private_ip_addresses)
+        }  
+      }
+    }
+  }
+}
 
-#     spec {
-#       containers {
-#         image = "gcr.io/eatn-production/payment-service:v1"
-#         env {
-#           name = "COUNTRY_CODE"
-#           value = "us"
-#         }
-#         env {
-#           name = "POSTGRES_HOST"
-#           value = module.payment_service_us_db.master_private_ip_address
-#         }
-#         env {
-#           name = "POSTGRES_USER"
-#           value = module.payment_service_us_db.db_user_name
-#         }
-#         env {
-#           name = "POSTGRES_DB"
-#           value = module.payment_service_us_db.db_name
-#         }
-#         env {
-#           name = "POSTGRES_PASSWORD"
-#           value = module.payment_service_us_db.db_user_password
-#         }      
-#         env {
-#           name = "POSTGRES_REPLICA_IPS"
-#           value = join(",", module.payment_service_us_db.replica_private_ip_addresses)
-#         }  
-#       }
-#     }
-#   }
-# }
+resource "google_cloud_run_service_iam_member" "payment_service_us_us_east1_public_access" {
+  location = google_cloud_run_service.payment_service_us_us_east1.location
+  project  = google_cloud_run_service.payment_service_us_us_east1.project
+  service  = google_cloud_run_service.payment_service_us_us_east1.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
-# resource "google_cloud_run_service_iam_member" "payment_service_us_us_west1_public_access" {
-#   location = google_cloud_run_service.payment_service_us_us_west1.location
-#   project  = google_cloud_run_service.payment_service_us_us_west1.project
-#   service  = google_cloud_run_service.payment_service_us_us_west1.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
+resource "google_compute_region_network_endpoint_group" "payment_service_us_us_central1_neg" {
+  provider              = google-beta
+  name                  = "payment-service-us-us-central1-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = "us-central1"
+  cloud_run {
+    service = google_cloud_run_service.payment_service_us_us_central1.name
+  }
+}
 
-# resource "google_cloud_run_service" "payment_service_us_us_east1" {
-#   name     = "payment-service-us-us-east1"
-#   location = "us-east1"
-#   project  = "eatn-production"
 
-#   depends_on = [
-#     google_vpc_access_connector.payment_service_us_us_east1_connector
-#   ]
+resource "google_compute_region_network_endpoint_group" "payment_service_us_us_east1_neg" {
+  provider              = google-beta
+  name                  = "payment-service-us-us-east1-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = "us-east1"
+  cloud_run {
+    service = google_cloud_run_service.payment_service_us_us_east1.name
+  }
+}
 
-#   template {
-#     metadata {
-#       annotations = {
-#         "autoscaling.knative.dev/maxScale"      = "5"     
-#         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.payment_service_us_us_east1_connector.self_link
-#       }
-#     }
+resource "google_compute_backend_service" "payment_service_us_backend_service" {
+  provider = google-beta
+  project = "eatn-production"
+  name = "payment-service-us-backend"
 
-#     spec {
-#       containers {
-#         image = "gcr.io/eatn-production/payment-service:v1"
-#         env {
-#           name = "COUNTRY_CODE"
-#           value = "us"
-#         }
-#         env {
-#           name = "POSTGRES_HOST"
-#           value = module.payment_service_us_db.master_private_ip_address
-#         }
-#         env {
-#           name = "POSTGRES_USER"
-#           value = module.payment_service_us_db.db_user_name
-#         }
-#         env {
-#           name = "POSTGRES_DB"
-#           value = module.payment_service_us_db.db_name
-#         }
-#         env {
-#           name = "POSTGRES_PASSWORD"
-#           value = module.payment_service_us_db.db_user_password
-#         }      
-#         env {
-#           name = "POSTGRES_REPLICA_IPS"
-#           value = join(",", module.payment_service_us_db.replica_private_ip_addresses)
-#         }  
-#       }
-#     }
-#   }
-# }
+  description = null
+  connection_draining_timeout_sec = null
+  enable_cdn = false
+  custom_request_headers = []
 
-# resource "google_cloud_run_service_iam_member" "payment_service_us_us_east1_public_access" {
-#   location = google_cloud_run_service.payment_service_us_us_east1.location
-#   project  = google_cloud_run_service.payment_service_us_us_east1.project
-#   service  = google_cloud_run_service.payment_service_us_us_east1.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
+  backend {   
+    group = google_compute_region_network_endpoint_group.payment_service_us_us_central1_neg.id   
+  }
 
-# resource "google_compute_region_network_endpoint_group" "payment_service_us_us_central1_neg" {
-#   provider              = google-beta
-#   name                  = "payment-service-us-us-central1-neg"
-#   network_endpoint_type = "SERVERLESS"
-#   region                = "us-central1"
-#   cloud_run {
-#     service = google_cloud_run_service.payment_service_us_us_central1.name
-#   }
-# }
 
-# resource "google_compute_region_network_endpoint_group" "payment_service_us_us_west1_neg" {
-#   provider              = google-beta
-#   name                  = "payment-service-us-us-west1-neg"
-#   network_endpoint_type = "SERVERLESS"
-#   region                = "us-west1"
-#   cloud_run {
-#     service = google_cloud_run_service.payment_service_us_us_west1.name
-#   }
-# }
-
-# resource "google_compute_region_network_endpoint_group" "payment_service_us_us_east1_neg" {
-#   provider              = google-beta
-#   name                  = "payment-service-us-us-east1-neg"
-#   network_endpoint_type = "SERVERLESS"
-#   region                = "us-east1"
-#   cloud_run {
-#     service = google_cloud_run_service.payment_service_us_us_east1.name
-#   }
-# }
-
-# resource "google_compute_backend_service" "payment_service_us_backend_service" {
-#   provider = google-beta
-#   project = "eatn-production"
-#   name = "payment-service-us-backend"
-
-#   description = null
-#   connection_draining_timeout_sec = null
-#   enable_cdn = false
-#   custom_request_headers = []
-
-#   backend {   
-#     group = google_compute_region_network_endpoint_group.payment_service_us_us_central1_neg.id   
-#   }
-
-#   backend {   
-#     group = google_compute_region_network_endpoint_group.payment_service_us_us_west1_neg.id   
-#   }
-
-#   backend {   
-#     group = google_compute_region_network_endpoint_group.payment_service_us_us_east1_neg.id   
-#   }
+  backend {   
+    group = google_compute_region_network_endpoint_group.payment_service_us_us_east1_neg.id   
+  }
   
-#   security_policy                 = null    
-#   log_config {
-#     enable      = false
-#     sample_rate = null
-#   }
-# }
+  security_policy                 = null    
+  log_config {
+    enable      = false
+    sample_rate = null
+  }
+}
 
-# #  ========== End of Cloud Run Payment Service US ===================
+#  ========== End of Cloud Run Payment Service US ===================

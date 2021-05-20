@@ -1,0 +1,5 @@
+setup-*
+master.sh
+__pycache
+venv
+deploy*.sh

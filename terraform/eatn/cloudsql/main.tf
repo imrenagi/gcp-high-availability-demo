@@ -9,7 +9,7 @@ resource "google_sql_database_instance" "sql_master_instance" {
   deletion_protection = false
   database_version = "POSTGRES_11"
   settings {
-    tier = "db-f1-micro"
+    tier = "db-custom-1-3840"
     ip_configuration {
       ipv4_enabled    = false
       private_network = var.network
@@ -52,7 +52,7 @@ resource "google_sql_database_instance" "sql_replica_instance" {
   database_version = "POSTGRES_11"
 
   settings {
-    tier = "db-f1-micro"
+    tier = "db-custom-1-3840"
     ip_configuration {
       ipv4_enabled    = false
       private_network = var.network
